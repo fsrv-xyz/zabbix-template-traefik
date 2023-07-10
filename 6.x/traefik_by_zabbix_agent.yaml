@@ -1,0 +1,102 @@
+zabbix_export:
+  version: '6.0'
+  date: '2023-07-10T04:48:28Z'
+  groups:
+    -
+      uuid: 7df96b18c230490a9a0a9e2307226338
+      name: Templates
+  templates:
+    -
+      uuid: 03c8bd189ed14af9a5a65eb9b14f8eb8
+      template: 'Traefik by Zabbix agent'
+      name: 'Traefik by Zabbix agent'
+      groups:
+        -
+          name: Templates
+      items:
+        -
+          uuid: 71deced745484feabb83af18938547f3
+          name: 'Traefik HTTP Services'
+          key: 'web.page.get["localhost", "/api/http/services", {$TRAEFIK.API.PORT}]'
+          delay: 10s
+          trends: '0'
+          value_type: TEXT
+          preprocessing:
+            -
+              type: REGEX
+              parameters:
+                - '\r\n\r\n(.*)$'
+                - \1
+      discovery_rules:
+        -
+          uuid: f1e37d89894f42aaad4fdc6a2c2e27d0
+          name: 'HTTP Status Discovery'
+          type: DEPENDENT
+          key: traefik.http.service.discovery
+          delay: '0'
+          lifetime: '0'
+          item_prototypes:
+            -
+              uuid: 4e6be0ae3ded40aeb8cabf8076c40a5d
+              name: 'Status of backend {#SERVERURL} in {#NAME}'
+              type: DEPENDENT
+              key: 'server.status[{#NAME}, {#SERVERURL}]'
+              delay: '0'
+              trends: '0'
+              value_type: TEXT
+              preprocessing:
+                -
+                  type: JSONPATH
+                  parameters:
+                    - '$.[?(@.name==''{#NAME}'')].serverStatus[''{#SERVERURL}''].first()'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: UNKNOWN
+              master_item:
+                key: 'web.page.get["localhost", "/api/http/services", {$TRAEFIK.API.PORT}]'
+              tags:
+                -
+                  tag: traefik-service
+                  value: '{#NAME}'
+              trigger_prototypes:
+                -
+                  uuid: 777dfd2032b54ffb96000dd8443be62a
+                  expression: 'last(/Traefik by Zabbix agent/server.status[{#NAME}, {#SERVERURL}])<>"UP"'
+                  name: 'Service Backend "{#SERVERURL}" for {#NAME} down'
+                  priority: HIGH
+                  tags:
+                    -
+                      tag: service
+                      value: '{#NAME}'
+          master_item:
+            key: 'web.page.get["localhost", "/api/http/services", {$TRAEFIK.API.PORT}]'
+          preprocessing:
+            -
+              type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value);  // Parse the JSON data
+                  var transformedData = [];  // This will hold the transformed data
+                  
+                  // Iterate over each service in the data
+                  for (var i = 0; i < data.length; i++) {
+                      var service = data[i];
+                      if (service.type != "loadbalancer") {
+                          continue;
+                      }
+                      var statuses = service.serverStatus;
+                      var serviceName = service.name;
+                  
+                      // Iterate over each server in the statuses
+                      for (var url in statuses) {
+                          // Add the server to the transformed data
+                          transformedData.push({"{#SERVERURL}": url, "{#STATUS}": statuses[url], "{#NAME}": serviceName});
+                      }
+                  }
+                  
+                  // Return the transformed data as JSON
+                  return JSON.stringify({"data": transformedData});
+
+      macros:
+        -
+          macro: '{$TRAEFIK.API.PORT}'
+          value: '8081'
